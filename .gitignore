@@ -1,0 +1,39 @@
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter and generated scripts
+.ipynb_checkpoints/
+.cache/
+
+# Datasets and outputs
+data/raw/*
+!data/raw/.gitkeep
+
+data/processed/*
+!data/processed/.gitkeep
+
+# Trained models and logs
+*.cbm
+*.pt
+*.pth
+*.pkl
+*.joblib
+*.ubj
+*.log
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
