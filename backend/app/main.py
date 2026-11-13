@@ -1,7 +1,9 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import json, os, shutil, uuid, urllib.request, urllib.error
+import json, math, os, shutil, uuid, urllib.request, urllib.error
+from functools import lru_cache
+import pandas as pd
 from pydantic import BaseModel, Field
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -10,6 +12,7 @@ from .results import ResultError, load_prediction
 ROOT = Path(__file__).resolve().parents[2]
 DATA = Path(os.environ.get('FORECAST_DATA_DIR', ROOT / 'data'))
 TEST = DATA / 'raw/test_solo_track.parquet'
+HISTORY = DATA / 'raw/train_solo_track.parquet'
 SOURCE = DATA / 'raw/best_score.csv'
 STORE = DATA / 'processed/web'
 MAX_BYTES = 10 * 1024 * 1024
@@ -81,6 +84,20 @@ def download(run_id: str):
     return FileResponse(path,media_type='text/csv',filename=meta['name'])
 
 
+
+@lru_cache(maxsize=4)
+def read_recent_history(path: str, modified_ns: int, first_forecast: str) -> dict[str, dict[str, int]]:
+    del modified_ns
+    start=datetime.fromisoformat(first_forecast)-timedelta(hours=2)
+    end=datetime.fromisoformat(first_forecast)
+    data=pd.read_parquet(path,columns=['route_id','timestamp','target_1h'],filters=[('timestamp','>=',start),('timestamp','<',end)])
+    data=data.dropna(subset=['route_id','timestamp','target_1h'])
+    result={}
+    for row in data.itertuples(index=False):
+        value=float(row.target_1h)
+        if math.isfinite(value):result.setdefault(str(row.route_id),{})[row.timestamp.isoformat(timespec='seconds')]=round(value)
+    return result
+
 class AssistantRequest(BaseModel):
     run_id: str
     question: str = Field(min_length=1, max_length=2000)
@@ -99,29 +116,37 @@ def assistant(body: AssistantRequest):
     if body.timestamp not in result['timestamps']: raise HTTPException(422,'Неизвестное время прогноза')
     try: earlier=(datetime.fromisoformat(body.timestamp)-timedelta(hours=2)).isoformat(timespec='seconds')
     except ValueError as exc: raise HTTPException(422,'Некорректное время') from exc
-    if earlier not in result['timestamps']: earlier=None
     scope=set(body.route_ids) if body.route_ids is not None else None
     by_route={}
     for row in result['rows']:
         if scope is not None and row['route_id'] not in scope: continue
         by_route.setdefault(row['route_id'],{})[row['timestamp']]=row['y_pred']
     if not by_route: return {'answer':'Для этого склада нет привязанных прогнозов направлений.','route_ids':[]}
+    first=datetime.fromisoformat(result['timestamps'][0])
+    history_times=[(first-timedelta(hours=2)+timedelta(minutes=30*i)).isoformat(timespec='seconds') for i in range(4)]
+    if earlier not in result['timestamps'] and earlier not in history_times: earlier=None
+    recent={}
+    if HISTORY.is_file():
+        try: recent=read_recent_history(str(HISTORY),HISTORY.stat().st_mtime_ns,result['timestamps'][0])
+        except (OSError,ValueError,KeyError): recent={}
     context=[]
     for route_id,values in by_route.items():
-        current=values.get(body.timestamp)
-        if current is None: continue
-        past=values.get(earlier) if earlier else None
-        context.append([route_id,round(current),round(past) if past is not None else None,round(sum(values.values())/len(values)),round(max(values.values())),max(values,key=values.get)[11:16]])
-    system=('Ты ИИ помощник диспетчера. Отвечай по-русски кратко и только на основе данных. '
-      'Значения — прогноз товаров за час; соседние интервалы перекрываются, их нельзя суммировать. '
-      'Нет фактических рейсов, GPS, истории до прогноза и подтверждённых аномалий. '
-      'Связь направлений со складами демонстрационная, не выдавай её за фактическую. '
-      'Если нет данных, прямо скажи об этом. Для выделения маршрутов верни JSON: '
+        observed=recent.get(route_id,{})
+        context.append([route_id,[observed.get(t) for t in history_times],[round(values[t]) if t in values else None for t in result['timestamps']]])
+    system=('Ты ИИ помощник диспетчера. Отвечай по-русски понятно и только на основе данных. '
+      'forecast содержит строки: id направления, history (фактические отгрузки), prediction (прогноз). '
+      'Времена history и prediction перечислены отдельно; каждое значение — отгрузка за час к этому времени. '
+      'Чтобы ответить об изменении за два часа, сравни выбранное время с точкой на два часа раньше: '
+      'она может быть в history или prediction. Назови оба значения и изменение, если они известны. Всегда различай исторический факт и прогноз. '
+      'Соседние часовые интервалы пересекаются, их нельзя складывать. '
+      'Нет реальных GPS и подтверждённых аномалий; связь направлений со складами демонстрационная. '
+      'Если данных действительно нет, скажи об этом обычными словами без имён полей и null. '
+      'Не добавляй предупреждения, не относящиеся к вопросу. Для выделения маршрутов верни JSON: '
       '{"answer":"текст", "route_ids":["id"]}. Указывай только ID из данных, максимум 5.')
     payload=json.dumps({'model':os.environ.get('POLZA_MODEL','deepseek/deepseek-v4.1-flash-1017'),'messages':[
       {'role':'system','content':system},
       *[{'role':m['role'],'content':m['content'][:2000]} for m in body.history if m.get('role') in ('user','assistant') and isinstance(m.get('content'),str)],
-      {'role':'user','content':json.dumps({'question':body.question,'selected_time':body.timestamp,'two_hours_before':earlier,'selected_route':body.route_id,'forecast_columns':['id','current','two_hours_ago','mean','peak','peak_time'],'forecast':context},ensure_ascii=False,separators=(',',':'))}
+      {'role':'user','content':json.dumps({'question':body.question,'selected_time':body.timestamp,'two_hours_before':earlier,'selected_route':body.route_id,'history_times':history_times,'forecast_times':result['timestamps'],'forecast_columns':['id','history','prediction'],'forecast':context},ensure_ascii=False,separators=(',',':'))}
     ],'response_format':{'type':'json_object'},'reasoning':{'enabled':False},'temperature':0.2,'max_tokens':1200},ensure_ascii=False).encode()
     req=urllib.request.Request('https://polza.ai/api/v1/chat/completions',data=payload,headers={'Authorization':f'Bearer {key}','Content-Type':'application/json'},method='POST')
     try:

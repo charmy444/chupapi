@@ -1,13 +1,14 @@
 import {useEffect, useRef, useState} from 'react'
 import {ArrowUp, Bot, MapPinned, Plus, X} from 'lucide-react'
 import type {Row} from './api'
+import {samplePrompts} from './prompts'
 import './operations.css'
 type Message={role:'user'|'assistant';text:string;ids?:string[]}
-const prompts=['На каких направлениях ожидается пиковая отгрузка?','Что изменилось за два часа?','Какие маршруты требуют внимания?']
+
 export default function Assistant({open,active,rows,onClose,onRoute,onMap,selectedRoute,runId,scope,scopeLabel}:{open:boolean;active:string;rows:Row[];onClose:()=>void;onRoute:(id:string)=>void;onMap:(ids:string[])=>void;selectedRoute:string;runId:string;scope:string[]|null;scopeLabel:string}){
- const [messages,setMessages]=useState<Message[]>([]),[question,setQuestion]=useState(''),[busy,setBusy]=useState(false)
+ const [messages,setMessages]=useState<Message[]>([]),[question,setQuestion]=useState(''),[busy,setBusy]=useState(false),[prompts,setPrompts]=useState(samplePrompts)
  const bottom=useRef<HTMLDivElement>(null),pending=useRef<AbortController|null>(null),generation=useRef(0)
- const clearChat=()=>{generation.current++;pending.current?.abort();pending.current=null;setMessages([]);setQuestion('');setBusy(false)}
+ const clearChat=()=>{generation.current++;pending.current?.abort();pending.current=null;setMessages([]);setQuestion('');setBusy(false);setPrompts(samplePrompts())}
  useEffect(()=>{if(open)bottom.current?.scrollIntoView({block:'nearest'})},[messages,busy,open])
  useEffect(()=>{clearChat();return()=>pending.current?.abort()},[scopeLabel,scope?.join(',')])
  async function send(text:string){

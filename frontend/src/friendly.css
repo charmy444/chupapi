@@ -117,3 +117,7 @@ body{background:#f1f3f8}
 @media(max-width:640px){.brand-mark{width:34px;height:34px}.sidebar-hover-rail .sidebar-toggle{display:none}}
 .brand-mark>svg:first-child{transform:none;width:19px;height:19px}
 .brand-mark{grid-template-columns:none;grid-template-rows:none;align-items:center;justify-items:center;gap:0}
+
+/* A compact rail must never expose the dispatcher name. */
+.brand-short{display:none}.brand-label strong,.brand-short{font-family:Georgia,serif;letter-spacing:-.04em;font-size:21px}.dispatcher{overflow:hidden}@media(min-width:641px){.sidebar-collapsed .dispatcher>div{display:none}.sidebar-collapsed .dispatcher{justify-content:center}.sidebar-collapsed .brand-label{display:none}.sidebar-collapsed .brand-short{display:block}.sidebar-collapsed .brand{justify-content:center}}
+.sidebar-hover-rail .brand-label strong{font-family:Georgia,serif;font-size:20px;letter-spacing:-.04em}.sidebar-hover-rail .brand-short{font-family:Georgia,serif;font-size:19px;letter-spacing:-.04em}@media(min-width:641px){.sidebar-hover-rail.sidebar-collapsed .brand-label{display:none}.sidebar-hover-rail.sidebar-collapsed .dispatcher>div{display:none}}
