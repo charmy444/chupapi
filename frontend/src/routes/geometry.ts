@@ -33,3 +33,12 @@ export function slicePath(coordinates: Coordinate[], start: number, end: number)
   const a = pointAlong(coordinates, cumulative, start), b = pointAlong(coordinates, cumulative, end)
   return [a.coordinate, ...coordinates.slice(a.index, b.index), b.coordinate]
 }
+
+/** Average direction across nearby road segments so dense OSM vertices do not jerk the truck. */
+export function smoothBearing(coordinates: Coordinate[], cumulative: number[], progress: number): number {
+  const total=cumulative[cumulative.length-1] || 1
+  const delta=Math.min(0.025,80/total)
+  const a=pointAlong(coordinates,cumulative,Math.max(0,progress-delta)).coordinate
+  const b=pointAlong(coordinates,cumulative,Math.min(1,progress+delta)).coordinate
+  return Math.atan2((b[0]-a[0])*Math.cos(a[1]*radians),b[1]-a[1])/radians
+}

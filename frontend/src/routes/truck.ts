@@ -1,8 +1,10 @@
 import * as THREE from 'three'
+import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js'
 import {RoundedBoxGeometry} from 'three/examples/jsm/geometries/RoundedBoxGeometry.js'
 import {MercatorCoordinate, type CustomLayerInterface, type Map as MapLibreMap} from 'maplibre-gl'
-import {pointAlong, type Coordinate} from './geometry'
+import {pointAlong, smoothBearing, type Coordinate} from './geometry'
 import type {DemoRoute} from './catalog'
+import {warehouseForDock,type DockWarehouse} from './docks'
 
 function material(color: string, roughness = 0.65) {
   return new THREE.MeshStandardMaterial({color, roughness, metalness: 0.08})
@@ -63,7 +65,7 @@ export function makeTruck(): THREE.Group {
   return truck
 }
 
-function makeWarehouse(): THREE.Group {
+export function makeWarehouse(): THREE.Group {
   const group=new THREE.Group(), wall=material('#e9e4ed'), roof=material('#faf9fc'), purple=material('#9913bd'), door=material('#90879c')
   box(group,[28,20,10],[0,0,5],wall)
   box(group,[29,21,0.7],[0,0,10.4],roof)
@@ -77,8 +79,11 @@ function makeWarehouse(): THREE.Group {
   return group
 }
 
-export function createTruckLayer(route: DemoRoute, getProgress: () => number): CustomLayerInterface {
-  const scene=new THREE.Scene(), camera=new THREE.Camera(), truck=makeTruck()
+export function createTruckLayer(route: DemoRoute, getProgress: () => number,getRoute:()=>DemoRoute): CustomLayerInterface & {placeWarehouse:(index:number,placement:DockWarehouse)=>void} {
+  const scene=new THREE.Scene(), camera=new THREE.Camera(), truck=new THREE.Group(), fallback=makeTruck()
+  truck.add(fallback)
+  let disposed=false
+  const warehouses: THREE.Group[]=[]
   const origin=MercatorCoordinate.fromLngLat(route.coordinates[0])
   const meter=origin.meterInMercatorCoordinateUnits()
   function local(position: Coordinate) {
@@ -88,24 +93,67 @@ export function createTruckLayer(route: DemoRoute, getProgress: () => number): C
   scene.add(truck, new THREE.AmbientLight('#ffffff',1.6))
   const light=new THREE.DirectionalLight('#ffffff',2.3);light.position.set(-100,-200,400);scene.add(light)
   for (const [index, point] of [route.coordinates[0],route.coordinates[route.coordinates.length-1]].entries()) {
-    const warehouse=makeWarehouse()
-    warehouse.position.copy(local(point)).add(new THREE.Vector3(index ? 30 : -30,25,0))
-    scene.add(warehouse)
+    const warehouse=new THREE.Group()
+    const fallbackWarehouse=makeWarehouse();fallbackWarehouse.scale.setScalar(3.5);warehouse.add(fallbackWarehouse)
+    const bearing=smoothBearing(route.coordinates,route.cumulative,index?1:0)
+    const placement=warehouseForDock(point,bearing,index===0)
+    warehouse.position.copy(local(placement.center));warehouse.rotation.z=placement.rotation
+    warehouse.userData.placed=false;warehouses.push(warehouse);scene.add(warehouse)
   }
   let renderer: THREE.WebGLRenderer, map: MapLibreMap
   const transform=new THREE.Matrix4().makeTranslation(origin.x,origin.y,origin.z).scale(new THREE.Vector3(meter,-meter,meter))
   return {
     id:'demo-truck', type:'custom',renderingMode:'3d',
+    placeWarehouse(index,placement){const warehouse=warehouses[index];if(!warehouse)return;warehouse.position.copy(local(placement.center));warehouse.rotation.z=placement.rotation;warehouse.userData.placed=true;map?.triggerRepaint()},
     onAdd(m,gl) {
       map=m
       renderer=new THREE.WebGLRenderer({canvas:m.getCanvas(),context:gl as WebGL2RenderingContext,antialias:true})
       renderer.autoClear=false
+      const loader=new GLTFLoader()
+      loader.load('/models/semi-trailer-original.glb',gltf=>{
+        if(disposed){disposeScene(gltf.scene);return}
+        gltf.scene.traverse(object=>{
+          if(!(object instanceof THREE.Mesh))return
+          const name=object.name.toLowerCase()
+          if(name.includes('box_trailer') || name.includes('tractor_sleeper_cab')){
+            const old=object.material as THREE.MeshStandardMaterial
+            object.material=old.clone()
+            ;(object.material as THREE.MeshStandardMaterial).color.set(name.includes('box_trailer')?'#a110bd':'#f5f3f6')
+          }
+        })
+        // Source model is Y-up with its cab in +Z; the map scene is Z-up and travels +Y.
+        const aligned=new THREE.Group();gltf.scene.rotation.x=Math.PI/2;aligned.rotation.z=Math.PI;aligned.add(gltf.scene)
+        truck.add(aligned)
+        const canvas=document.createElement('canvas');canvas.width=512;canvas.height=256
+        const context=canvas.getContext('2d')!
+        context.fillStyle='#fff';context.font='800 150px Arial';context.textAlign='center';context.textBaseline='middle';context.fillText('WB',256,135)
+        const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace
+        const print=new THREE.MeshBasicMaterial({map:texture,transparent:true,side:THREE.DoubleSide,depthWrite:false})
+        for(const x of [-1.26,1.26]){
+          const side=new THREE.Mesh(new THREE.PlaneGeometry(6,2.6),print)
+          side.rotation.set(Math.PI/2,x>0?Math.PI/2:-Math.PI/2,0);side.position.set(x,-2.18,2.6);truck.add(side)
+        }
+        const top=new THREE.Mesh(new THREE.PlaneGeometry(5,2.2),print)
+        top.rotation.z=Math.PI/2;top.position.set(0,-2.18,4.01);truck.add(top)
+        fallback.visible=false;m.triggerRepaint()
+      },undefined,()=>{/* Keep the lightweight built-in model if the asset fails. */})
+      loader.load('/warehouse-light.glb',gltf=>{
+        if(disposed){disposeScene(gltf.scene);return}
+        for(const warehouse of warehouses){
+          warehouse.children[0].visible=false
+          const model=gltf.scene.clone(true);model.rotation.x=Math.PI/2;model.scale.setScalar(1.4);model.position.y=-25.41;warehouse.add(model)
+        }
+        m.triggerRepaint()
+      },undefined,()=>{/* Keep the fallback warehouse if the asset is unavailable. */})
     },
     render(_gl,args) {
+      const route=getRoute()
       const point=pointAlong(route.coordinates,route.cumulative,getProgress())
-      truck.position.copy(local(point.coordinate));truck.rotation.z=-point.bearing*Math.PI/180
+      truck.position.copy(local(point.coordinate));truck.rotation.z=-smoothBearing(route.coordinates,route.cumulative,getProgress())*Math.PI/180
+      // Warehouses are invisible at regional scale; omit their meshes to keep playback smooth.
+      for(const warehouse of warehouses)warehouse.visible=map.getZoom()>=14 && warehouse.userData.placed
       const metersPerPixel=40075016.686*Math.cos(point.coordinate[1]*Math.PI/180)/(512*2**map.getZoom())
-      truck.scale.setScalar(Math.max(1.5,Math.min(28,metersPerPixel*6.5)))
+      truck.scale.setScalar(Math.max(1,Math.min(400,metersPerPixel*2.5)))
       camera.projectionMatrix.fromArray(args.defaultProjectionData.mainMatrix).multiply(transform)
       camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert()
       // Render the selected vehicle as a geographic annotation, above the base map's depth.
@@ -113,18 +161,23 @@ export function createTruckLayer(route: DemoRoute, getProgress: () => number): C
       renderer.resetState();renderer.clearDepth();renderer.render(scene,camera)
     },
     onRemove() {
-      const materials=new Set<THREE.Material>(), geometries=new Set<THREE.BufferGeometry>(), textures=new Set<THREE.Texture>()
-      scene.traverse(object=>{
-        if(object instanceof THREE.Mesh){
-          geometries.add(object.geometry)
-          for(const mat of Array.isArray(object.material)?object.material:[object.material]){
-            materials.add(mat)
-            for(const value of Object.values(mat))if(value instanceof THREE.Texture)textures.add(value)
-          }
-        }
-      })
-      textures.forEach(t=>t.dispose());materials.forEach(m=>m.dispose());geometries.forEach(g=>g.dispose())
+      disposed=true
+      disposeScene(scene)
       renderer?.dispose()
     },
   }
+}
+
+function disposeScene(scene: THREE.Object3D) {
+  const materials=new Set<THREE.Material>(), geometries=new Set<THREE.BufferGeometry>(), textures=new Set<THREE.Texture>()
+  scene.traverse(object=>{
+    if(object instanceof THREE.Mesh){
+      geometries.add(object.geometry)
+      for(const mat of Array.isArray(object.material)?object.material:[object.material]){
+        materials.add(mat)
+        for(const value of Object.values(mat))if(value instanceof THREE.Texture)textures.add(value)
+      }
+    }
+  })
+  textures.forEach(t=>t.dispose());materials.forEach(m=>m.dispose());geometries.forEach(g=>g.dispose())
 }

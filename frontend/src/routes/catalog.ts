@@ -15,10 +15,12 @@ export type DemoRoute = {
 // Sorting IDs in the caller keeps the assignment stable across sources and time slices.
 export function demoRoute(id: string, index: number, count: number): DemoRoute {
   const city = cities[index % cities.length]
+  // Keep departures and arrivals near the outer ends of the interurban route.
   const variant = Math.floor(index / cities.length)
   const variants = Math.ceil(count / cities.length)
-  const start = variant / Math.max(1, variants) * 0.32
-  const end = 0.62 + variant / Math.max(1, variants) * 0.38
+  const side = Math.ceil(Math.sqrt(variants))
+  const start = (variant % side) / Math.max(1, side - 1) * 0.04
+  const end = 0.96 + Math.floor(variant / side) / Math.max(1, side - 1) * 0.04
   const coordinates = slicePath(city.coordinates as Coordinate[], start, end)
   const cumulative = measure(coordinates)
   return {id, city: city.city, origin: `Склад ${id} · А`, destination: `Склад ${id} · Б`, coordinates, cumulative, length: cumulative[cumulative.length - 1]}

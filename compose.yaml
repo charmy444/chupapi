@@ -5,6 +5,8 @@ services:
       dockerfile: backend/Dockerfile
     environment:
       FORECAST_DATA_DIR: /app/data
+      POLZA_API_KEY: ${POLZA_API_KEY:-}
+      POLZA_MODEL: ${POLZA_MODEL:-deepseek/deepseek-v4.1-flash-1017}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
