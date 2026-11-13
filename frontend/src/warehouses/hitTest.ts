@@ -8,3 +8,8 @@ export function closestMarker<T>(markers:Iterable<T>, x:number, y:number, radius
  }
  return closest
 }
+
+/** At country scale, a click selects an area; only closer views open a warehouse. */
+export function isWarehouseScale(cameraDistance:number):boolean {
+ return cameraDistance < 100
+}
