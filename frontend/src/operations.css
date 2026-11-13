@@ -11,3 +11,6 @@
 .highlight-marker{border:2px solid #fff;border-radius:8px;padding:7px 10px;background:#8212a6;color:white;font-weight:700;font-size:12px;box-shadow:0 2px 12px #2a123955;cursor:pointer;white-space:nowrap}.national-recommended{margin-top:22px}.national-recommended>strong{display:block;font-size:12px;margin-bottom:8px}.national-recommended button{display:flex;justify-content:space-between;align-items:center;width:100%;padding:10px 0;border:0;border-bottom:1px solid #f0ebf1;background:white;text-align:left;color:#84209e;font-size:12px}.national-recommended small{display:block;margin-top:4px;color:#958a9a}
 .national-pagination{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-top:12px;color:#938699;font-size:11px;flex:none}.national-pagination div{display:flex;align-items:center;gap:8px}.national-pagination button{display:grid;place-items:center;width:30px;height:30px;border:1px solid #e8e0eb;border-radius:7px;background:#fff;color:#76687d}.national-pagination button:disabled{opacity:.35}
 .national-sidebar p.warehouse-placement-error{padding:10px;margin:0 0 12px;background:#faf3ed;border-radius:8px;color:#856046}
+
+.assistant-form textarea{min-width:0;min-height:36px;max-height:150px;line-height:20px;padding:8px 4px;overflow-y:hidden;scrollbar-width:thin}.assistant-form button{flex:0 0 36px}
+.scenario-note{line-height:1.7}
